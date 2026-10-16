@@ -6,7 +6,7 @@ from docx.oxml import OxmlElement
 from docx.text.paragraph import Paragraph
 from PIL import Image, ImageOps
 
-CAMPOS = ('modelo','fecha','vin','patente','sistema','motivo','entidades','analisis')
+CAMPOS = ('modelo','fecha','vin','patente','sistema','motivo','entidades','analisis','responsable','cargo','correo','numero_informe')
 
 def generar_informe(datos, fotos=(), plantilla=None):
     """fotos: secuencia de (bytes de imagen, descripción). No guarda datos en disco."""
@@ -17,6 +17,8 @@ def generar_informe(datos, fotos=(), plantilla=None):
         for fila in tabla.rows:
             for celda in fila.cells:
                 parrafos.extend(celda.paragraphs)
+    tiene_responsable = any('{{responsable}}' in p.text for p in parrafos)
+    tiene_numero = any('{{numero_informe}}' in p.text for p in parrafos)
     for p in parrafos:
         texto = p.text
         for k,v in valores.items():
@@ -57,14 +59,14 @@ def generar_informe(datos, fotos=(), plantilla=None):
     ancla._p.getparent().remove(ancla._p)
     # El número se muestra bajo el título; la plantilla original sigue siendo compatible.
     numero = str(datos.get('numero_informe', '')).strip()
-    if numero:
+    if numero and not tiene_numero:
         nodo = OxmlElement('w:p')
         doc.paragraphs[0]._p.addnext(nodo)
         p = Paragraph(nodo, doc._body)
         p.alignment = 2
         p.add_run(f'Informe N.º {numero}').bold = True
     # Responsable al final del cuerpo, después de toda la evidencia.
-    if datos.get('responsable'):
+    if datos.get('responsable') and not tiene_responsable:
         p = doc.add_paragraph()
         p.paragraph_format.space_before = Pt(14)
         p.paragraph_format.keep_with_next = True

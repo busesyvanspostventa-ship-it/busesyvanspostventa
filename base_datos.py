@@ -19,6 +19,7 @@ def conectar(ruta=None):
 
 def inicializar(ruta=None):
     with closing(conectar(ruta)) as c, c:
+        c.execute('BEGIN IMMEDIATE')
         c.execute('''CREATE TABLE IF NOT EXISTS informes (
             id INTEGER PRIMARY KEY, prefijo TEXT NOT NULL, secuencia INTEGER NOT NULL,
             numero TEXT NOT NULL UNIQUE, huella TEXT NOT NULL UNIQUE,
