@@ -55,6 +55,26 @@ def generar_informe(datos, fotos=(), plantilla=None):
         p.add_run(f'Fotografía {i}. ').bold = True
         p.add_run(descripcion.strip() or 'Sin descripción.')
     ancla._p.getparent().remove(ancla._p)
+    # El número se muestra bajo el título; la plantilla original sigue siendo compatible.
+    numero = str(datos.get('numero_informe', '')).strip()
+    if numero:
+        nodo = OxmlElement('w:p')
+        doc.paragraphs[0]._p.addnext(nodo)
+        p = Paragraph(nodo, doc._body)
+        p.alignment = 2
+        p.add_run(f'Informe N.º {numero}').bold = True
+    # Responsable al final del cuerpo, después de toda la evidencia.
+    if datos.get('responsable'):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(14)
+        p.paragraph_format.keep_with_next = True
+        p.add_run('RESPONSABLE DEL INFORME').bold = True
+        for clave in ('responsable', 'cargo', 'correo'):
+            p = doc.add_paragraph(str(datos.get(clave, '')).strip())
+            p.paragraph_format.space_after = Pt(3)
+            p.paragraph_format.keep_with_next = clave != 'correo'
+            for r in p.runs:
+                r.font.size = Pt(10)
     salida = BytesIO()
     doc.save(salida)
     return salida.getvalue()

@@ -2,24 +2,29 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from hashlib import sha256
 import re
+import csv
+from io import StringIO, BytesIO
+from PIL import Image
 import streamlit as st
 from generador import generar_informe
+from base_datos import guardar_informe, listar_informes, respaldo_base
 
 MODELOS = ['U9', 'U10', 'U12', 'D9', 'D10']
 RESPONSABLES = {
-    'Alejandro Vasquez Andrews': {'cargo': 'Jefe Asistencia Técnica Buses y Vans (iveco)', 'correo': 'avasqueza@andesmotor.cl'},
-    'Ignacio Gutiérrez Gaete': {'cargo': 'Supervisor de Flotas Buses', 'correo': 'ignacio.gutierrez@andesmotor.cl'},
-    'Patricio Gormaz Pardo': {'cargo': 'Ingeniero de Operaciones y Desarrollo Técnico', 'correo': 'pgormaz@andesmotor.cl'},
-    'Dimas Toro Echeverria': {'cargo': 'Ingeniero de Operaciones y Desarrollo Técnico', 'correo': 'dimas.toro@andesmotor.cl'},
-    'David Esparza': {'cargo': 'Supervisor de Flotas Buses', 'correo': 'desparza@andesmotor.cl'},
-    'Danilo Flores Burgos': {'cargo': 'Ingeniero de Operaciones y Desarrollo Técnico', 'correo': 'danilo.flores@andesmotor.cl'},
+    'Alejandro Vasquez Andrews': {'prefijo': 'AV', 'cargo': 'Jefe Asistencia Técnica Buses y Vans (iveco)', 'correo': 'avasqueza@andesmotor.cl'},
+    'Ignacio Gutiérrez Gaete': {'prefijo': 'IG', 'cargo': 'Supervisor de Flotas Buses', 'correo': 'ignacio.gutierrez@andesmotor.cl'},
+    'Patricio Gormaz Pardo': {'prefijo': 'PG', 'cargo': 'Ingeniero de Operaciones y Desarrollo Técnico', 'correo': 'pgormaz@andesmotor.cl'},
+    'Dimas Toro Echeverria': {'prefijo': 'DT', 'cargo': 'Ingeniero de Operaciones y Desarrollo Técnico', 'correo': 'dimas.toro@andesmotor.cl'},
+    'David Esparza': {'prefijo': 'DE', 'cargo': 'Supervisor de Flotas Buses', 'correo': 'desparza@andesmotor.cl'},
+    'Danilo Flores Burgos': {'prefijo': 'DF', 'cargo': 'Ingeniero de Operaciones y Desarrollo Técnico', 'correo': 'danilo.flores@andesmotor.cl'},
 }
 
 st.set_page_config(page_title='Informes técnicos Foton', page_icon='🚌', layout='centered')
 st.title('Informes técnicos Foton')
 st.caption('Postventa · Andes Motor · Plantilla Word')
 st.write('Completa los antecedentes, agrega las fotos y descarga el informe editable.')
-st.info('Marca fija: FOTON. Los datos se usan en esta sesión; descarga el informe para conservarlo.')
+st.info('Marca fija: FOTON. Se guardan el correlativo, los datos y los textos del informe. Las fotos y el archivo Word no se guardan en la base.')
+st.caption('Base local SQLite: conserva la carpeta datos y descarga respaldos. En Community Cloud el almacenamiento local no es permanente.')
 a,b = st.columns(2)
 modelo = a.selectbox('Modelo *', ['Selecciona un modelo'] + MODELOS)
 fecha = b.date_input('Fecha de evaluación', datetime.now(ZoneInfo('America/Santiago')).date())
@@ -30,13 +35,7 @@ st.subheader('Motivo de admisión')
 motivo = st.text_area('Síntoma o reclamo informado *', height=110)
 st.subheader('Entidades')
 participantes = st.text_area('Cliente, taller y otras personas participantes', placeholder='Cliente / operador:\nTaller / sucursal:')
-responsable = st.selectbox('Responsable del informe *', ['Selecciona un responsable'] + list(RESPONSABLES))
-perfil = RESPONSABLES.get(responsable)
 entidades = participantes.strip()
-if perfil:
-    st.text_input('Cargo', value=perfil['cargo'], disabled=True)
-    st.text_input('Correo', value=perfil['correo'], disabled=True)
-    entidades = '\n'.join(filter(None, [entidades, f'Responsable: {responsable}', f'Cargo: {perfil["cargo"]}', f'Correo: {perfil["correo"]}']))
 st.subheader('Análisis')
 analisis = st.text_area('Inspección, diagnóstico, intervención y resultado *', height=190, placeholder='Inspección realizada:\nDiagnóstico confirmado o pendiente:\nIntervención:\nResultado y pendientes:')
 st.subheader('Evidencia')
@@ -48,14 +47,25 @@ for i,f in enumerate(archivos[:12]):
     contenido = f.getvalue()
     if len(contenido)>10*1024*1024:
         errores.append(f'{f.name}: supera 10 MB.'); continue
+    try:
+        with Image.open(BytesIO(contenido)) as imagen:
+            imagen.verify()
+    except Exception:
+        errores.append(f'{f.name}: no es una imagen válida.'); continue
     with st.expander(f'Fotografía {i+1}: {f.name}', expanded=True):
         st.image(contenido, width=280)
         desc = st.text_input('Descripción del hallazgo', key=f'foto_{i}_{sha256(contenido).hexdigest()[:16]}')
         fotos.append((contenido,desc))
-datos=dict(modelo=modelo,fecha=fecha.strftime('%d-%m-%Y'),vin=vin,patente=patente,sistema=sistema,motivo=motivo,entidades=entidades,analisis=analisis)
+st.subheader('Responsable del informe')
+responsable = st.selectbox('Responsable *', ['Selecciona un responsable'] + list(RESPONSABLES))
+perfil = RESPONSABLES.get(responsable)
+if perfil:
+    st.text(f"{perfil['cargo']}\n{perfil['correo']}")
+    st.caption(f"Correlativo {perfil['prefijo']}-0001, {perfil['prefijo']}-0002… Se asigna al guardar.")
+datos=dict(modelo=modelo,fecha=fecha.strftime('%d-%m-%Y'),vin=vin,patente=patente,sistema=sistema,motivo=motivo,entidades=entidades,analisis=analisis,responsable=responsable,cargo=perfil['cargo'] if perfil else '',correo=perfil['correo'] if perfil else '')
 firma=sha256(repr((datos,[(sha256(x).hexdigest(),y) for x,y in fotos])).encode()).hexdigest()
 confirmado=st.checkbox('Revisé los antecedentes técnicos y las descripciones de las fotos.')
-if st.button('Generar informe Word', type='primary'):
+if st.button('Generar Word y registrar correlativo', type='primary'):
     st.session_state.pop('informe', None)
     if modelo not in MODELOS: errores.append('Selecciona un modelo Foton.')
     if perfil is None: errores.append('Selecciona al responsable del informe.')
@@ -68,16 +78,41 @@ if st.button('Generar informe Word', type='primary'):
         for e in errores: st.error(e)
     else:
         try:
-            documento=generar_informe(datos,fotos)
-            identificador=re.sub(r'[^A-Za-z0-9_-]','',patente or vin)
-            nombre=f'Informe_Foton_{identificador}_{fecha:%Y%m%d}.docx'
-            st.session_state.informe=(firma,documento,nombre)
-        except Exception:
-            st.error('No se pudo generar el informe. Revisa que las fotos sean JPG/PNG válidos y que plantilla_foton.docx esté junto a app.py.')
+            resultado, nuevo = guardar_informe(datos, fotos, perfil['prefijo'], firma, generar_informe)
+            st.session_state.informe=(firma,resultado['documento'],resultado['nombre_archivo'],resultado['numero'])
+            if not nuevo:
+                st.info('Este contenido ya tiene correlativo. Se generó el Word con el mismo número.')
+        except Exception as exc:
+            st.error(f'No se pudo guardar el informe. No se asignó un nuevo correlativo. Detalle: {exc}')
 if 'informe' in st.session_state:
-    firma_guardada,documento,nombre=st.session_state.informe
+    firma_guardada,documento,nombre,numero=st.session_state.informe
     if firma_guardada==firma and confirmado and not errores:
-        st.success('Informe listo para descargar.')
+        st.success(f'Informe {numero} registrado. Descarga el Word antes de cerrar la sesión.')
         st.download_button('Descargar Word', documento, nombre, mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     else:
         st.warning('Los datos cambiaron. Genera nuevamente el informe para descargar la versión actualizada.')
+
+
+st.divider()
+st.subheader('Historial de informes')
+st.caption('Datos y textos del informe. No se almacenan archivos Word ni fotografías. Una descarga no consume un correlativo.')
+try:
+    registros = listar_informes()
+    filtro = st.text_input('Buscar por número, patente, VIN, modelo o responsable')
+    visibles = [r for r in registros if not filtro or filtro.casefold() in ' '.join(str(v) for v in r.values()).casefold()]
+    st.dataframe(visibles, use_container_width=True, hide_index=True)
+    if registros:
+        salida = StringIO()
+        escritor = csv.DictWriter(salida, fieldnames=list(registros[0]))
+        escritor.writeheader()
+        for registro in registros:
+            # Evita que texto del usuario sea interpretado como fórmula al abrir en Excel.
+            escritor.writerow({k: ("'"+str(v) if str(v).lstrip().startswith(('=','+','-','@')) else v) for k,v in registro.items()})
+        st.download_button('Exportar historial CSV', salida.getvalue().encode('utf-8-sig'), 'historial_foton.csv', 'text/csv')
+    if st.button('Preparar respaldo completo'):
+        st.session_state.respaldo = respaldo_base()
+    if 'respaldo' in st.session_state:
+        st.download_button('Descargar respaldo de base de datos', st.session_state.respaldo, 'informes_foton.db', 'application/octet-stream')
+        st.caption('Incluye únicamente la base de registros y correlativos al momento de preparar el respaldo. Prepáralo nuevamente después de emitir más informes.')
+except Exception as exc:
+    st.error(f'No se pudo abrir el historial: {exc}')
