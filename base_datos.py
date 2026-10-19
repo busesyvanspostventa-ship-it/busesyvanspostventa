@@ -29,7 +29,8 @@ def _hojas():
     credenciales['private_key'] = credenciales['private_key'].replace('\\n', '\n')
     scopes = ['https://www.googleapis.com/auth/spreadsheets']
     cliente = gspread.authorize(Credentials.from_service_account_info(credenciales, scopes=scopes))
-    libro = cliente.open_by_key(st.secrets['google_sheets']['spreadsheet_id'])
+    spreadsheet_id = str(st.secrets["google_sheets"]["spreadsheet_id"]).strip().strip("/")
+libro = cliente.open_by_key(spreadsheet_id)
     informes = libro.worksheet('Informes')
     correlativos = libro.worksheet('Correlativos')
     return informes, correlativos
