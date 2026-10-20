@@ -484,3 +484,58 @@ def respaldo_base():
 def estado_conexion():
     informes, _ = _preparar()
     return informes.spreadsheet.title, _spreadsheet_id()
+
+# ==========================================================
+# REDUCIR CONSULTAS A GOOGLE SHEETS
+# Este bloque debe quedar al final de base_datos.py.
+# ==========================================================
+
+from functools import wraps
+
+
+# Revisa los encabezados como máximo cada cinco minutos,
+# en lugar de hacerlo con cada cambio del formulario.
+_preparar = st.cache_resource(
+    ttl=300,
+    show_spinner=False,
+)(_preparar)
+
+
+# Reutiliza el historial durante 60 segundos.
+listar_informes = st.cache_data(
+    ttl=60,
+    show_spinner=False,
+)(listar_informes)
+
+
+# Reutiliza los datos de conexión durante cinco minutos.
+estado_conexion = st.cache_data(
+    ttl=300,
+    show_spinner=False,
+)(estado_conexion)
+
+
+def _actualizar_historial_despues(funcion):
+    """Invalida el historial después de una operación de escritura."""
+    @wraps(funcion)
+    def ejecutar(*args, **kwargs):
+        try:
+            return funcion(*args, **kwargs)
+        finally:
+            # También se limpia si hubo un error parcial de escritura.
+            listar_informes.clear()
+
+    return ejecutar
+
+
+guardar_informe = _actualizar_historial_despues(
+    guardar_informe
+)
+
+actualizar_informe = _actualizar_historial_despues(
+    actualizar_informe
+)
+
+eliminar_informe = _actualizar_historial_despues(
+    eliminar_informe
+)
