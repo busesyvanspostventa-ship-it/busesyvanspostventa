@@ -172,7 +172,7 @@ def guardar_informe(datos, fotos, prefijo, firma, generar_informe):
                                 creado_en=_ahora(), actualizado_en=_ahora(), estado='Activo')
                 hoja.append_row([str(registro.get(k, '')) for k in COLUMNAS], value_input_option='RAW')
             return {'documento': documento, 'numero': numero,
-                    'nombre_archivo': f'Informe_Foton_{numero}.docx'}, nuevo
+                    'nombre_archivo': f'Informe_Foton_{modelo}_{numero}.docx'}, nuevo
     finally:
         listar_informes.clear()
 
