@@ -2,6 +2,7 @@
 import csv
 import json
 import re
+import unicodedata
 from io import StringIO
 from datetime import datetime
 from threading import RLock
@@ -67,17 +68,43 @@ def _encabezados(hoja, columnas):
                 values=[columnas[len(actuales):]], value_input_option='RAW')
 
 
+def _normalizar_encabezado(valor):
+    texto = unicodedata.normalize('NFKD', str(valor).strip().lower())
+    return ''.join(c for c in texto if c.isalnum() and not unicodedata.combining(c))
+
+
+def _preparar_correlativos(hoja):
+    cabecera = hoja.row_values(1)
+    if not cabecera:
+        _encabezados(hoja, CONTADORES)
+        return
+    normalizados = [_normalizar_encabezado(c) for c in cabecera]
+    nombres_prefijo = {'prefijo', 'prefix', 'prefijousuario', 'prefijoresponsable'}
+    nombres_numero = {
+        'ultimonumero', 'ultimo', 'ultimocorrelativo', 'correlativo',
+        'contador', 'numerocorrelativo', 'ultimonumerousado',
+    }
+    if (len(normalizados) >= 2 and normalizados[0] in nombres_prefijo
+            and normalizados[1] in nombres_numero):
+        # Solo normaliza A1:B1. No toca registros ni columnas adicionales.
+        if cabecera[:2] != CONTADORES:
+            hoja.update(range_name='A1:B1', values=[CONTADORES], value_input_option='RAW')
+        return
+    raise ValueError(
+        'No se reconocen los encabezados de Correlativos. '
+        f'A1={cabecera[0]!r}; B1={cabecera[1] if len(cabecera) > 1 else "(vacío)"!r}. '
+        'Se espera prefijo en A1 y ultimo_numero en B1. '
+        'No se modificaron los valores. Comparte los encabezados antes de cambiar su orden.'
+    )
+
+
 @st.cache_resource(ttl=300, show_spinner=False)
 def _preparar():
     with LOCK:
         informes, correlativos = _hojas()
+        # Revisar Correlativos primero para detectar incompatibilidades antes de migrar Informes.
+        _preparar_correlativos(correlativos)
         _encabezados(informes, COLUMNAS)
-        # Compatibilidad con la cabecera histórica usada en Correlativos.
-        cabecera = correlativos.row_values(1)
-        if cabecera[:2] == ['prefijo', 'último número']:
-            correlativos.update(range_name='A1:B1', values=[CONTADORES], value_input_option='RAW')
-        else:
-            _encabezados(correlativos, CONTADORES)
         return informes, correlativos
 
 
