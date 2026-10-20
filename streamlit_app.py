@@ -65,7 +65,7 @@ st.set_page_config(
     layout="centered",
 )
 
-st.title("Informes técnicos Foton")
+st.title("Informes técnicos Asistencia Tecnica MDLA ByV")
 st.caption("Postventa · Andes Motor · Plantilla Word")
 
 usuario_ingreso, responsable_sesion = exigir_ingreso(RESPONSABLES)
