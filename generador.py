@@ -7,13 +7,20 @@ from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.text.paragraph import Paragraph
 from PIL import Image, ImageOps
+from anexos import validar_anexos, paginas_pdf
 
 CAMPOS = ('modelo', 'fecha', 'vin', 'patente', 'sistema', 'motivo',
-          'entidades', 'analisis', 'numero_informe')
+          'entidades', 'analisis', 'numero_informe',
+          'cliente', 'km', 'sucursal', 'tipo_atencion')
 
 
-def generar_informe(datos, fotos=(), plantilla=None):
+def generar_informe(datos, fotos=(), plantilla=None, foto_vin=None, anexos=()):
     """Genera el Word en memoria. Las fotografías no se almacenan."""
+    if not foto_vin:
+        raise ValueError('Es obligatorio adjuntar la fotografía del VIN.')
+    validar_anexos(anexos)
+    fotos = [(foto_vin, 'Evidencia obligatoria: fotografía del VIN del vehículo. VIN informado: '
+              + str(datos.get('vin') or 'No informado'))] + list(fotos)
     doc = Document(plantilla or Path(__file__).with_name('plantilla_foton.docx'))
     valores = {k: str(datos.get(k, '') or '').strip() or 'No informado' for k in CAMPOS}
 
@@ -110,6 +117,24 @@ def generar_informe(datos, fotos=(), plantilla=None):
             for r in p.runs:
                 r.font.size = Pt(12)
                 r.bold = clave == 'responsable'
+
+    # Los anexos van después de la firma. Cada página PDF ocupa una página Word.
+    for indice, (nombre, contenido) in enumerate(anexos, 1):
+        for pagina, total, imagen, ancho, alto in paginas_pdf(contenido):
+            p = doc.add_paragraph()
+            p.paragraph_format.page_break_before = True
+            p.paragraph_format.keep_with_next = True
+            p.paragraph_format.space_after = Pt(6)
+            p.add_run(f'Anexo {indice} · {nombre[:100]} · página {pagina}/{total}').bold = True
+            seccion = doc.sections[-1]
+            ancho_max = seccion.page_width - seccion.left_margin - seccion.right_margin
+            alto_max = seccion.page_height - seccion.top_margin - seccion.bottom_margin - Cm(2.5)
+            escala = min(ancho_max / ancho, alto_max / alto)
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.line_spacing = 1
+            p.add_run().add_picture(BytesIO(imagen), width=int(ancho * escala), height=int(alto * escala))
 
     # Tipografía uniforme; los párrafos de contenido quedan justificados.
     def formatear(parrafo):
