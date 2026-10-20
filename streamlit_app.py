@@ -72,10 +72,6 @@ st.write(
     "Completa los antecedentes, agrega las fotos "
     "y descarga el informe editable."
 )
-st.info(
-    "Marca fija: FOTON. Se guardan datos y textos en Google Sheets. "
-    "Las fotografías y el Word no se almacenan en la base."
-)
 
 a, b = st.columns(2)
 
