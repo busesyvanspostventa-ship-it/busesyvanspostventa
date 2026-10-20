@@ -97,14 +97,14 @@ def generar_informe(datos, fotos=(), plantilla=None):
         p.alignment = 2
         p.add_run(f'Informe N.º {numero}').bold = True
 
-    # Responsable siempre al final, incluso si la plantilla tenía marcadores.
+    # Responsable centrado al final, sin encabezado.
+    parrafos_firma = []
     if str(datos.get('responsable', '') or '').strip():
-        p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(14)
-        p.paragraph_format.keep_with_next = True
-        p.add_run('RESPONSABLE DEL INFORME').bold = True
         for clave in ('responsable', 'cargo', 'correo'):
             p = doc.add_paragraph(str(datos.get(clave, '') or '').strip())
+            parrafos_firma.append(p._p)
+            if clave == 'responsable':
+                p.paragraph_format.space_before = Pt(14)
             p.paragraph_format.space_after = Pt(3)
             p.paragraph_format.keep_with_next = clave != 'correo'
             for r in p.runs:
@@ -114,11 +114,20 @@ def generar_informe(datos, fotos=(), plantilla=None):
     # Tipografía uniforme; los párrafos de contenido quedan justificados.
     def formatear(parrafo):
         contiene_imagen = bool(parrafo._p.xpath('.//w:drawing'))
-        if not contiene_imagen and not parrafo.text.startswith('Informe N.º'):
+        es_titulo = parrafo.text.strip().casefold() == 'informe técnico de falla'
+        es_firma = parrafo._p in parrafos_firma
+        if es_titulo or es_firma:
+            parrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            parrafo.paragraph_format.left_indent = Cm(0)
+            parrafo.paragraph_format.right_indent = Cm(0)
+            parrafo.paragraph_format.first_line_indent = Cm(0)
+        elif not contiene_imagen and not parrafo.text.startswith('Informe N.º'):
             parrafo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         for run in parrafo.runs:
             run.font.name = 'Calibri'
-            run.font.size = Pt(12)
+            run.font.size = Pt(14 if es_titulo else 12)
+            if es_titulo:
+                run.bold = True
             fuentes = run._element.get_or_add_rPr().rFonts
             if fuentes is not None:
                 for atributo in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
