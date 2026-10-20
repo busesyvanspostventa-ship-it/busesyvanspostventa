@@ -1,8 +1,4 @@
-"""Base de datos de informes Foton en Google Sheets.
-
-Guarda datos y textos.
-No guarda fotografías ni archivos Word.
-"""
+"""Google Sheets: guarda datos y textos, sin fotos ni archivos Word."""
 
 import csv
 import json
@@ -17,31 +13,16 @@ import streamlit as st
 from google.oauth2.service_account import Credentials
 
 
-# Protege operaciones dentro de una misma instancia de la aplicación.
 LOCK = RLock()
 
 COLUMNAS = [
-    "numero",
-    "fecha",
-    "modelo",
-    "vin",
-    "patente",
-    "marca",
-    "sistema",
-    "motivo",
-    "entidades",
-    "analisis",
-    "responsable",
-    "cargo",
-    "correo",
-    "firma",
-    "creado_en",
-    "actualizado_en",
-    "estado",
+    "numero", "fecha", "modelo", "vin", "patente", "marca",
+    "sistema", "motivo", "entidades", "analisis",
+    "responsable", "cargo", "correo", "firma",
+    "creado_en", "actualizado_en", "estado",
 ]
 
 CONTADORES = ["prefijo", "ultimo_numero"]
-
 PREFIJOS_VALIDOS = {"AV", "IG", "PG", "DT", "DE", "DF"}
 
 
@@ -56,7 +37,6 @@ def _texto(valor):
 
 
 def _spreadsheet_id():
-    """Acepta el ID o un enlace completo de Google Sheets."""
     try:
         valor = str(
             st.secrets["google_sheets"]["spreadsheet_id"]
@@ -68,171 +48,128 @@ def _spreadsheet_id():
 
     if valor.startswith(("https://", "http://")):
         coincidencia = re.search(
-            r"/spreadsheets/d/([A-Za-z0-9_-]+)",
-            valor,
+            r"/spreadsheets/d/([A-Za-z0-9_-]+)", valor
         )
-
         if not coincidencia:
-            raise RuntimeError(
-                "El enlace configurado no corresponde a Google Sheets."
-            )
-
+            raise RuntimeError("El enlace de Google Sheets no es válido.")
         valor = coincidencia.group(1)
 
     if not re.fullmatch(r"[A-Za-z0-9_-]+", valor):
-        raise RuntimeError(
-            "El ID de Google Sheets está vacío o contiene "
-            "caracteres incorrectos."
-        )
+        raise RuntimeError("El ID de Google Sheets no es válido.")
 
     return valor
 
 
 @st.cache_resource(show_spinner=False)
 def _hojas():
-    """Conecta con las pestañas Informes y Correlativos."""
-    try:
-        if "gcp_service_account" in st.secrets:
-            credenciales = dict(st.secrets["gcp_service_account"])
+    if "gcp_service_account" in st.secrets:
+        credenciales = dict(st.secrets["gcp_service_account"])
 
-        elif (
-            "gcp" in st.secrets
-            and "credentials_json" in st.secrets["gcp"]
-        ):
-            try:
-                credenciales = json.loads(
-                    st.secrets["gcp"]["credentials_json"]
-                )
-            except (json.JSONDecodeError, TypeError):
-                raise RuntimeError(
-                    "credentials_json no contiene un JSON válido. "
-                    "Copia el contenido del archivo JSON de la "
-                    "cuenta de servicio dentro de las comillas triples."
-                ) from None
-
-        else:
-            raise RuntimeError(
-                "Faltan credenciales en Secrets. Configura "
-                "[gcp].credentials_json o [gcp_service_account]."
+    elif (
+        "gcp" in st.secrets
+        and "credentials_json" in st.secrets["gcp"]
+    ):
+        try:
+            credenciales = json.loads(
+                st.secrets["gcp"]["credentials_json"]
             )
-
-    except FileNotFoundError:
+        except (json.JSONDecodeError, TypeError):
+            raise RuntimeError(
+                "credentials_json no contiene un JSON válido."
+            ) from None
+    else:
         raise RuntimeError(
-            "No se encontró la configuración de Secrets."
-        ) from None
-
-    if not isinstance(credenciales, dict):
-        raise RuntimeError(
-            "Las credenciales deben ser un objeto JSON."
+            "Faltan credenciales [gcp].credentials_json "
+            "o [gcp_service_account] en Secrets."
         )
 
-    campos_requeridos = (
-        "private_key",
-        "client_email",
-        "token_uri",
-    )
+    if not isinstance(credenciales, dict):
+        raise RuntimeError("Las credenciales deben ser un objeto JSON.")
 
     faltantes = [
         campo
-        for campo in campos_requeridos
+        for campo in ("private_key", "client_email", "token_uri")
         if not credenciales.get(campo)
     ]
-
     if faltantes:
         raise RuntimeError(
-            "Faltan campos en las credenciales: "
-            + ", ".join(faltantes)
+            "Faltan campos en las credenciales: " + ", ".join(faltantes)
         )
 
     credenciales["private_key"] = str(
         credenciales["private_key"]
     ).replace("\\n", "\n")
 
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-    ]
-
     try:
         credenciales_google = Credentials.from_service_account_info(
             credenciales,
-            scopes=scopes,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"],
         )
     except (ValueError, TypeError):
         raise RuntimeError(
-            "No se pudieron interpretar las credenciales. "
-            "Revisa el JSON y el formato de la clave privada."
+            "No se pudieron interpretar las credenciales de Google."
         ) from None
 
     cliente = gspread.authorize(credenciales_google)
-    identificador = _spreadsheet_id()
 
     try:
-        libro = cliente.open_by_key(identificador)
-
+        libro = cliente.open_by_key(_spreadsheet_id())
     except gspread.exceptions.SpreadsheetNotFound:
         raise RuntimeError(
-            "No se encontró la planilla. Revisa su ID y compártela "
-            "con el correo client_email de la cuenta de servicio."
+            "No se encontró la planilla. Revisa su ID y "
+            "compártela con la cuenta de servicio."
         ) from None
-
     except PermissionError:
         raise RuntimeError(
-            "La cuenta de servicio no tiene acceso a la planilla. "
-            "Compártela como Editor con su correo client_email "
+            "La cuenta de servicio no tiene acceso. "
+            "Comparte la planilla como Editor con su client_email "
             "y verifica que Google Sheets API esté habilitada."
         ) from None
 
     try:
         informes = libro.worksheet("Informes")
         correlativos = libro.worksheet("Correlativos")
-
     except gspread.exceptions.WorksheetNotFound:
         raise RuntimeError(
-            "La planilla debe tener dos pestañas llamadas "
-            "exactamente Informes y Correlativos."
+            "Deben existir las pestañas Informes y Correlativos."
         ) from None
 
     return informes, correlativos
 
 
-def _asegurar_encabezados(hoja, esperados, rango):
-    """Prepara hojas vacías sin sobrescribir registros existentes."""
+def _asegurar_encabezados(hoja, esperados):
     valores = hoja.get_all_values()
 
     if not valores:
+        ultima = gspread.utils.rowcol_to_a1(1, len(esperados))
         hoja.update(
-            range_name=rango,
+            range_name=f"A1:{ultima}",
             values=[esperados],
             value_input_option="RAW",
         )
         return
 
     encabezados = valores[0]
+    if encabezados == esperados:
+        return
+
     tiene_registros = any(
         any(str(celda).strip() for celda in fila)
         for fila in valores[1:]
     )
 
-    if encabezados == esperados:
-        return
-
     if tiene_registros:
         raise RuntimeError(
-            f"La pestaña {hoja.title} contiene registros y sus "
-            "encabezados no coinciden con los esperados. "
-            "No se modificó su contenido. Encabezados requeridos: "
-            + ", ".join(esperados)
+            f"La pestaña {hoja.title} contiene registros y tiene "
+            "encabezados diferentes. No se modificó su contenido. "
+            "Se esperan: " + ", ".join(esperados)
         )
 
-    # Solo hay encabezados, sin registros: se normaliza la primera fila.
     ancho = max(len(encabezados), len(esperados))
-    ultima_celda = gspread.utils.rowcol_to_a1(1, ancho)
-
+    ultima = gspread.utils.rowcol_to_a1(1, ancho)
     hoja.update(
-        range_name=f"A1:{ultima_celda}",
-        values=[
-            esperados + [""] * (ancho - len(esperados))
-        ],
+        range_name=f"A1:{ultima}",
+        values=[esperados + [""] * (ancho - len(esperados))],
         value_input_option="RAW",
     )
 
@@ -240,31 +177,17 @@ def _asegurar_encabezados(hoja, esperados, rango):
 def _preparar():
     with LOCK:
         informes, correlativos = _hojas()
+        _asegurar_encabezados(informes, COLUMNAS)
 
-        _asegurar_encabezados(
-            informes,
-            COLUMNAS,
-            "A1:Q1",
-        )
-
-        # Acepta también la cabecera alternativa usada anteriormente.
-        encabezados_c = correlativos.row_values(1)
-        normalizados = [
-            str(valor).strip().lower()
-            for valor in encabezados_c
+        encabezados = [
+            str(x).strip().lower()
+            for x in correlativos.row_values(1)
         ]
-
-        variantes_validas = [
+        if encabezados not in (
             ["prefijo", "ultimo_numero"],
             ["prefijo", "último número"],
-        ]
-
-        if normalizados not in variantes_validas:
-            _asegurar_encabezados(
-                correlativos,
-                CONTADORES,
-                "A1:B1",
-            )
+        ):
+            _asegurar_encabezados(correlativos, CONTADORES)
 
         return informes, correlativos
 
@@ -274,12 +197,8 @@ def _leer_registros(hoja):
         expected_headers=COLUMNAS,
         numericise_ignore=["all"],
     )
-
     return [
-        {
-            columna: _texto(fila.get(columna, ""))
-            for columna in COLUMNAS
-        }
+        {columna: _texto(fila.get(columna, "")) for columna in COLUMNAS}
         for fila in filas
         if _texto(fila.get("numero", "")).strip()
     ]
@@ -291,9 +210,8 @@ def listar_informes(incluir_eliminados=False):
 
     if not incluir_eliminados:
         registros = [
-            registro
-            for registro in registros
-            if registro["estado"].strip().lower() != "eliminado"
+            r for r in registros
+            if r["estado"].strip().lower() != "eliminado"
         ]
 
     return list(reversed(registros))
@@ -302,19 +220,15 @@ def listar_informes(incluir_eliminados=False):
 def _siguiente(prefijo, registros, correlativos):
     valores = correlativos.get_all_values()
     fila_contador = None
-    ultimo_numero = 0
+    ultimo = 0
 
     for indice, fila in enumerate(valores[1:], start=2):
-        if not fila:
-            continue
-
-        if str(fila[0]).strip().upper() != prefijo:
+        if not fila or str(fila[0]).strip().upper() != prefijo:
             continue
 
         if fila_contador is not None:
             raise RuntimeError(
-                f"El prefijo {prefijo} está repetido en Correlativos. "
-                "Debe existir una sola fila por prefijo."
+                f"El prefijo {prefijo} está repetido en Correlativos."
             )
 
         fila_contador = indice
@@ -322,82 +236,70 @@ def _siguiente(prefijo, registros, correlativos):
 
         if contenido:
             try:
-                ultimo_numero = int(contenido)
+                ultimo = int(contenido)
             except ValueError:
                 raise RuntimeError(
-                    f"El contador de {prefijo} debe ser un número entero."
+                    f"El contador de {prefijo} debe ser un entero."
                 ) from None
 
-            if ultimo_numero < 0:
-                raise RuntimeError(
-                    f"El contador de {prefijo} no puede ser negativo."
-                )
+            if ultimo < 0:
+                raise RuntimeError("Los contadores no pueden ser negativos.")
 
-    # Considera también informes eliminados para no reutilizar números.
     patron = re.compile(rf"{re.escape(prefijo)}-(\d+)")
-
     for registro in registros:
         coincidencia = patron.fullmatch(registro["numero"])
-
         if coincidencia:
-            ultimo_numero = max(
-                ultimo_numero,
-                int(coincidencia.group(1)),
-            )
+            ultimo = max(ultimo, int(coincidencia.group(1)))
 
-    return ultimo_numero + 1, fila_contador
+    return ultimo + 1, fila_contador
+
+
+def _guardar_contador(correlativos, prefijo, ultimo, fila_contador):
+    if fila_contador is not None:
+        correlativos.update_cell(fila_contador, 2, ultimo)
+    else:
+        correlativos.append_row(
+            [prefijo, ultimo],
+            value_input_option="RAW",
+        )
 
 
 def _crear_documento(datos, fotos, numero, generar_informe):
-    datos_doc = dict(
-        datos,
-        numero=numero,
-        numero_informe=numero,
-    )
-
+    datos_doc = dict(datos, numero=numero, numero_informe=numero)
     resultado = generar_informe(datos_doc, fotos)
     nombre_predeterminado = f"Informe_Foton_{numero}.docx"
 
     if isinstance(resultado, dict):
         documento = resultado.get("documento")
-        nombre_archivo = (
-            resultado.get("nombre_archivo")
-            or nombre_predeterminado
-        )
-
+        nombre = resultado.get("nombre_archivo") or nombre_predeterminado
     elif isinstance(resultado, (tuple, list)) and len(resultado) >= 2:
-        documento, nombre_archivo = resultado[:2]
-        nombre_archivo = nombre_archivo or nombre_predeterminado
-
+        documento, nombre = resultado[:2]
+        nombre = nombre or nombre_predeterminado
     else:
         documento = resultado
-        nombre_archivo = nombre_predeterminado
+        nombre = nombre_predeterminado
 
     if hasattr(documento, "getvalue"):
         documento = documento.getvalue()
-
     elif hasattr(documento, "read"):
         if hasattr(documento, "seek"):
             documento.seek(0)
         documento = documento.read()
 
     if not isinstance(documento, bytes) or not documento:
-        raise TypeError(
-            "El generador no devolvió un documento Word válido."
-        )
+        raise TypeError("El generador no devolvió un Word válido.")
 
-    return documento, nombre_archivo
+    return documento, nombre
 
 
 def guardar_informe(datos, fotos, prefijo, firma, generar_informe):
-    """Genera Word en memoria y registra únicamente textos."""
+    """Genera el Word en memoria y guarda únicamente datos y textos."""
     prefijo = str(prefijo).strip().upper()
 
     if prefijo not in PREFIJOS_VALIDOS:
         raise ValueError("El prefijo del responsable no es válido.")
-
     if not firma:
-        raise ValueError("Falta la identificación del contenido del informe.")
+        raise ValueError("Falta la identificación del contenido.")
 
     with LOCK:
         informes, correlativos = _preparar()
@@ -405,59 +307,42 @@ def guardar_informe(datos, fotos, prefijo, firma, generar_informe):
 
         existente = next(
             (
-                registro
-                for registro in registros
-                if registro["firma"] == firma
-                and registro["estado"].strip().lower() != "eliminado"
+                r for r in registros
+                if r["firma"] == firma
+                and r["estado"].strip().lower() != "eliminado"
             ),
             None,
         )
 
         if existente:
             numero = existente["numero"]
-
-            documento, nombre_archivo = _crear_documento(
-                datos,
-                fotos,
-                numero,
-                generar_informe,
+            documento, nombre = _crear_documento(
+                datos, fotos, numero, generar_informe
             )
-
             return {
                 "documento": documento,
-                "nombre_archivo": nombre_archivo,
+                "nombre_archivo": nombre,
                 "numero": numero,
             }, False
 
         siguiente, fila_contador = _siguiente(
-            prefijo,
-            registros,
-            correlativos,
+            prefijo, registros, correlativos
         )
-
         numero = f"{prefijo}-{siguiente:04d}"
 
-        documento, nombre_archivo = _crear_documento(
-            datos,
-            fotos,
-            numero,
-            generar_informe,
+        documento, nombre = _crear_documento(
+            datos, fotos, numero, generar_informe
         )
 
-        # Comprobación adicional; no es un bloqueo entre varios servidores.
-        registros_actuales = _leer_registros(informes)
-
         if any(
-            registro["numero"] == numero
-            for registro in registros_actuales
+            r["numero"] == numero
+            for r in _leer_registros(informes)
         ):
             raise RuntimeError(
-                "Ese correlativo acaba de ser utilizado. "
-                "Vuelve a generar el informe."
+                "Ese correlativo acaba de ser utilizado. Reintenta."
             )
 
         momento = _ahora()
-
         registro = dict(
             datos,
             numero=numero,
@@ -469,145 +354,133 @@ def guardar_informe(datos, fotos, prefijo, firma, generar_informe):
         )
 
         informes.append_row(
-            [
-                _texto(registro.get(columna, ""))
-                for columna in COLUMNAS
-            ],
+            [_texto(registro.get(c, "")) for c in COLUMNAS],
             value_input_option="RAW",
         )
 
-        # El informe ya está registrado.
-        # Si falla el contador, el siguiente cálculo usa también el historial.
         try:
-            if fila_contador is not None:
-                correlativos.update_cell(
-                    fila_contador,
-                    2,
-                    siguiente,
-                )
-            else:
-                correlativos.append_row(
-                    [prefijo, siguiente],
-                    value_input_option="RAW",
-                )
-
+            _guardar_contador(
+                correlativos, prefijo, siguiente, fila_contador
+            )
         except Exception:
             st.warning(
-                f"El informe {numero} quedó registrado, pero no se pudo "
-                "actualizar la pestaña Correlativos. El siguiente número "
-                "también se calculará desde el historial."
+                f"El informe {numero} quedó registrado, pero no se "
+                "actualizó Correlativos. El siguiente cálculo también "
+                "revisa el historial."
             )
 
         return {
             "documento": documento,
-            "nombre_archivo": nombre_archivo,
+            "nombre_archivo": nombre,
             "numero": numero,
         }, True
 
 
 def actualizar_informe(numero, cambios):
     permitidos = {
-        "fecha",
-        "modelo",
-        "vin",
-        "patente",
-        "sistema",
-        "motivo",
-        "entidades",
-        "analisis",
+        "fecha", "modelo", "vin", "patente",
+        "sistema", "motivo", "entidades", "analisis",
     }
 
     with LOCK:
         hoja, _ = _preparar()
         filas = hoja.get_all_values()
 
-        for indice, fila in enumerate(filas[1:], start=2):
-            if not fila or fila[0] != numero:
-                continue
+        coincidencias = [
+            (indice, fila)
+            for indice, fila in enumerate(filas[1:], start=2)
+            if fila and fila[0] == numero
+        ]
 
-            actual = dict(
-                zip(COLUMNAS, fila + [""] * len(COLUMNAS))
+        if not coincidencias:
+            raise ValueError("No se encontró el informe.")
+        if len(coincidencias) > 1:
+            raise ValueError(
+                "El número está duplicado. Revisa la hoja antes de editar."
             )
 
-            if actual["estado"].strip().lower() == "eliminado":
-                raise ValueError(
-                    "No se puede editar un informe eliminado."
-                )
+        indice, fila = coincidencias[0]
+        actual = dict(zip(COLUMNAS, fila + [""] * len(COLUMNAS)))
 
-            actual.update(
-                {
-                    campo: _texto(valor)
-                    for campo, valor in cambios.items()
-                    if campo in permitidos
-                }
-            )
+        if actual["estado"].strip().lower() == "eliminado":
+            raise ValueError("No se puede editar un informe eliminado.")
 
-            actual["actualizado_en"] = _ahora()
-            actual["firma"] = ""
+        actual.update({
+            k: _texto(v)
+            for k, v in cambios.items()
+            if k in permitidos
+        })
+        actual["actualizado_en"] = _ahora()
+        actual["firma"] = ""
 
-            hoja.update(
-                range_name=f"A{indice}:Q{indice}",
-                values=[
-                    [actual[columna] for columna in COLUMNAS]
-                ],
-                value_input_option="RAW",
-            )
-
-            return
-
-        raise ValueError("No se encontró el informe solicitado.")
+        hoja.update(
+            range_name=f"A{indice}:Q{indice}",
+            values=[[actual[c] for c in COLUMNAS]],
+            value_input_option="RAW",
+        )
 
 
 def eliminar_informe(numero):
-    """Marca el registro como eliminado sin borrar su correlativo."""
+    """Borra la fila de Informes y conserva el correlativo utilizado."""
     with LOCK:
-        hoja, _ = _preparar()
-        filas = hoja.get_all_values()
+        informes, correlativos = _preparar()
+        numero = str(numero).strip()
 
-        for indice, fila in enumerate(filas[1:], start=2):
-            if fila and fila[0] == numero:
-                hoja.update(
-                    range_name=f"P{indice}:Q{indice}",
-                    values=[[_ahora(), "Eliminado"]],
-                    value_input_option="RAW",
-                )
-                return
+        coincidencia = re.fullmatch(r"([A-Z]{2})-(\d+)", numero)
+        if not coincidencia:
+            raise ValueError("El número de informe no es válido.")
 
-        raise ValueError("No se encontró el informe solicitado.")
+        prefijo = coincidencia.group(1)
+        filas = informes.get_all_values()
+
+        coincidencias = [
+            indice
+            for indice, fila in enumerate(filas[1:], start=2)
+            if fila and str(fila[0]).strip() == numero
+        ]
+
+        if not coincidencias:
+            raise ValueError("No se encontró el informe.")
+        if len(coincidencias) > 1:
+            raise ValueError(
+                "Ese número está duplicado. Revisa la hoja antes de borrar."
+            )
+
+        # Primero asegura el contador para no reutilizar números borrados.
+        registros = _leer_registros(informes)
+        siguiente, fila_contador = _siguiente(
+            prefijo, registros, correlativos
+        )
+
+        _guardar_contador(
+            correlativos,
+            prefijo,
+            siguiente - 1,
+            fila_contador,
+        )
+
+        # Solo se elimina si fue posible conservar el contador.
+        informes.delete_rows(coincidencias[0])
 
 
 def respaldo_base():
-    """Exporta todos los registros y textos como CSV."""
+    """CSV de datos y textos, incluidos registros eliminados antiguos."""
     salida = StringIO()
-
-    escritor = csv.DictWriter(
-        salida,
-        fieldnames=COLUMNAS,
-    )
-
+    escritor = csv.DictWriter(salida, fieldnames=COLUMNAS)
     escritor.writeheader()
 
     for fila in listar_informes(incluir_eliminados=True):
-        fila_segura = {}
-
+        segura = {}
         for campo, valor in fila.items():
             texto = _texto(valor)
-
             if texto.lstrip().startswith(("=", "+", "-", "@")):
                 texto = "'" + texto
-
-            fila_segura[campo] = texto
-
-        escritor.writerow(fila_segura)
+            segura[campo] = texto
+        escritor.writerow(segura)
 
     return salida.getvalue().encode("utf-8-sig")
 
 
 def estado_conexion():
-    """Devuelve el título y el ID de la planilla conectada."""
     informes, _ = _preparar()
-
-    return (
-        informes.spreadsheet.title,
-        _spreadsheet_id(),
-    )
+    return informes.spreadsheet.title, _spreadsheet_id()
