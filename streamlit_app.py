@@ -99,8 +99,8 @@ motivo = st.text_area(
 
 st.subheader("Entidades")
 entidades = st.text_area(
-    "Cliente, taller y otras personas participantes",
-    placeholder="Cliente / operador:\nTaller / sucursal:",
+    "Áreas anexas o externos que participaron ",
+    placeholder="Proveedor ;Fábrica",
 ).strip()
 
 st.subheader("Análisis")
