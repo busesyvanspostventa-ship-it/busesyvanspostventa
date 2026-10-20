@@ -60,7 +60,7 @@ RESPONSABLES = {
 
 
 st.set_page_config(
-    page_title="Informes técnicos Foton",
+    page_title="Informes técnicos Asistencia Tecnica MDLA ByV",
     page_icon="🚌",
     layout="centered",
 )
